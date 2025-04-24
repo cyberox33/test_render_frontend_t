@@ -1,0 +1,115 @@
+.container {
+    max-width: 800px;
+    margin: 30px auto; /* Vertical margin */
+    padding: 30px;
+    background-color: #ffffff; /* White background */
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    text-align: center; /* Center align most content by default */
+  }
+  
+  /* Style the main H1 title */
+  .container h1 {
+    color: #2c3e50; /* Deep slate blue/grey */
+    margin-top: 0;
+    margin-bottom: 15px; /* Space before divider */
+    font-family: "Poppins", sans-serif; /* Example font */
+    font-weight: 600;
+  }
+  
+  /* Style the divider */
+  .divider {
+    border: none;
+    border-top: 1px solid #e0e0e0; /* Light grey line */
+    margin-top: 0;
+    margin-bottom: 30px; /* Space after divider */
+  }
+  
+  /* Common style for status/info messages */
+  .statusMessage {
+    padding: 25px;
+    margin: 20px auto;
+    max-width: 600px; /* Constrain width */
+    border-radius: 5px;
+    background-color: #f8f9fa; /* Light grey background */
+    border: 1px solid #dee2e6; /* Subtle border */
+    color: #495057; /* Dark grey text */
+  }
+  
+  .statusMessage h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.4rem;
+    color: #343a40;
+  }
+  
+  .statusMessage p {
+    margin-bottom: 10px;
+    line-height: 1.6;
+  }
+  
+  /* Specific style for error messages */
+  .errorMessage {
+    padding: 20px;
+    margin: 20px auto;
+    max-width: 600px;
+    border-radius: 5px;
+    background-color: #f8d7da; /* Light red background */
+    border: 1px solid #f5c6cb; /* Red border */
+    color: #721c24; /* Dark red text */
+  }
+  
+  .errorMessage h2 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #721c24; /* Match text color */
+    font-size: 1.3rem;
+  }
+  
+  .errorMessage p {
+     margin-bottom: 0; /* Remove extra space below last paragraph */
+  }
+  
+  /* Download Button/Link Style */
+  .downloadButton {
+    display: inline-block; /* Allow padding/margin */
+    margin-top: 20px;
+    padding: 12px 25px;
+    background-color: #27ae60; /* Green, similar to submit buttons */
+    color: #ffffff;
+    text-decoration: none; /* Remove underline from link */
+    font-weight: 600;
+    border-radius: 5px;
+    font-family: 'Poppins', sans-serif; /* Example font */
+    font-size: 1.1rem;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.3s ease, box-shadow 0.2s ease;
+  }
+  
+  .downloadButton:hover {
+    background-color: #229954; /* Darker green */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    color: #ffffff; /* Ensure text remains white */
+  }
+  
+  .downloadButton:active {
+    background-color: #1e8449;
+  }
+  
+  /* Optional Refresh Button Style */
+  .refreshButton {
+    margin-top: 15px;
+    padding: 8px 18px;
+    cursor: pointer;
+    background-color: #6c757d; /* Grey color */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    transition: background-color 0.2s ease;
+  }
+  
+  .refreshButton:hover {
+     background-color: #5a6268;
+  }

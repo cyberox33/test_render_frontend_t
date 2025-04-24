@@ -1,0 +1,31 @@
+
+.questionContent {
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: #444;
+
+  }
+
+  .optionsList {
+    /* --- Remove list styling --- */
+    list-style: none; /* Should remove bullets */
+    list-style-type: none; /* Explicitly set type to none */
+    padding-left: 5px; /* Adjust indentation as needed, 0 if no indent desired */
+    margin: 10px 0 0 0; /* Control margin (top, right, bottom, left) */
+    font-family: "Poppins", sans-serif;
+}
+
+  .optionItem {
+    margin-bottom: 8px; /* Slightly more space between options */
+    color: #555;
+    font-size: 1rem; /* Will inherit font-family from .optionsList */
+    line-height: 1.4; /* Improve readability */
+  }
+
+  .optionLetter {
+      font-weight: bold;
+      margin-right: 8px;
+      /* Optional: Style the letter differently */
+      /* color: #00796B; */
+  }

@@ -1,0 +1,55 @@
+.authContainer {
+    max-width: 400px;
+    margin: 40px auto; /* Add vertical margin and center horizontally */
+    padding: 30px;
+    background-color: rgba(255, 255, 255, 0.9); /* Semi-transparent white background */
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    text-align: center;
+  }
+  
+  .authContainer h2 {
+    margin-bottom: 25px;
+    color: #333;
+  }
+  
+  .formGroup {
+    margin-bottom: 20px;
+    text-align: left; /* Align labels and inputs left */
+  }
+  
+  /* Inherits base button styles, specific adjustments */
+  .submitButton {
+    width: 100%;
+    padding: 12px;
+    font-size: 1.1rem;
+    margin-top: 10px; /* Space above submit button */
+  }
+  
+  .toggleMode {
+    margin-top: 25px;
+    font-size: 0.9rem;
+    color: #555;
+}
+  
+  .toggleButton {
+    background: none;
+    border: none;
+    text-decoration: underline;
+    padding: 0 5px; /* Add slight padding */
+    font-size: 0.9rem; /* Match surrounding text */
+    cursor: pointer;
+    color: #10d267;
+  }
+  
+  .toggleButton:hover {
+    background-color: transparent; /* Override global hover */
+    box-shadow: none; /* Override global hover */
+  }
+  
+  /* Optional: Add styles for error messages */
+  .errorMessage {
+      color: #dc3545; /* Bootstrap danger color */
+      font-size: 0.85rem;
+      margin-top: 15px;
+  }

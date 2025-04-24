@@ -1,0 +1,92 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* --- Background Image --- */
+  /* Replace 'background.jpg' with your image file name in src/assets */
+  /* The url path might need adjustment depending on your project setup/bundler */
+  background-image: url('./assets/background.jpg');
+  background-size: cover; /* Cover the entire viewport */
+  background-position: center center; /* Center the image */
+  background-repeat: no-repeat; /* Do not repeat the image */
+  background-attachment: fixed; /* Keep the background fixed during scroll */
+  transition: background-image 0.5s ease-in-out;
+  min-height: 100vh; /* Ensure body takes at least full viewport height */
+  color: #333; /* Default text color - adjust if needed for contrast */
+}
+
+body.survey-active-background {
+  /* Replace with your desired survey background image */
+  background-image: url('./assets/survey-background.jpg');
+
+  /* Optional: You might want different background properties */
+  /* background-size: contain; */
+  /* background-color: #f0f8ff; */ /* Fallback color */
+}
+
+#root {
+  /* Optional: Add some overall padding or constraints */
+   /* e.g., max-width: 1200px; margin: 0 auto; padding: 20px; */
+   min-height: 100vh; /* Ensure the root fills the viewport vertically */
+   display: flex; /* Helps in centering content vertically if needed */
+   flex-direction: column;
+   align-items: center; /* Center content horizontally */
+   justify-content: center; /* Center content vertically */
+   padding: 20px; /* Add some padding around the content */
+   box-sizing: border-box;
+}
+
+/* General Button Styling (Optional - Can be overridden by modules) */
+button {
+  cursor: pointer;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  background-color: #46a16d;
+  color: rgb(255, 255, 255);
+}
+
+button:hover {
+  background-color: #a6d531;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+button:active {
+   background-color: #004085;
+   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* General Input/Select/Textarea Styling (Optional) */
+input[type="text"],
+input[type="password"],
+select,
+textarea {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px; /* Add space below inputs */
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box; /* Include padding and border in the element's total width and height */
+  font-size: 1rem;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #555;
+}
