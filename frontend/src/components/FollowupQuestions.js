@@ -8,39 +8,35 @@ import {
 
 // Define the possible statuses from the backend's /recommendations/status endpoint
 const PipelineStatus = {
-    PIPELINE_RUNNING: 'pipeline_running', // New status: RAG is active
+    PIPELINE_RUNNING: 'pipeline_running', // RAG is active, questions might appear
     GENERATING_REPORT: 'generating_report', // Report generation started/active
     READY: 'ready', // Report is complete and URL available
     ERROR: 'error', // An error occurred
-    NOT_FOUND: 'not_found' // Session ID invalid or not found
+    NOT_FOUND: 'not_found', // Session ID invalid or not found
+    // Add other initial states if the backend might return them here
+    SESSION_CREATED: 'session_created',
+    STARTED: 'started',
 };
 
 
 const FollowupQuestions = ({ sessionId }) => {
-    // --- Existing States ---
+    // --- States ---
     const [followupQuestions, setFollowupQuestions] = useState([]);
-    const [loading, setLoading] = useState(true); // For initial question load
+    const [loading, setLoading] = useState(true); // For initial page load
     const [answers, setAnswers] = useState({});
     const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState(''); // For user-facing errors (submission, fetch)
-    const [pipelineState, setPipelineState] = useState(PipelineStatus.PIPELINE_RUNNING); // Track overall state, default to running
+    const [error, setError] = useState(''); // For user-facing errors
+    // Removed pipelineState as direct state, status check result handles logic flow
 
     // --- Hooks and Refs ---
     const navigate = useNavigate();
-    const followupIntervalRef = useRef(null);
-    const statusCheckIntervalRef = useRef(null); // Ref for the status polling interval
-    const isMounted = useRef(true); // Track if component is mounted to prevent state updates after unmount
+    const pollingIntervalRef = useRef(null); // Single ref for the combined interval
+    const isMounted = useRef(true); // Track if component is mounted
 
-    // --- Fetch Follow-up Questions ---
+    // --- Fetch Follow-up Questions (Only called when needed) ---
     const fetchAndSetQuestions = useCallback(async () => {
-        // Only fetch if the pipeline is potentially running and component is mounted
-        if (!isMounted.current || pipelineState !== PipelineStatus.PIPELINE_RUNNING) {
-            // console.log("Skipping followup fetch: Component unmounted or pipeline not running.");
-            return;
-        }
-        // console.log("Polling for followup questions..."); // Keep commented unless debugging needed
-        // Don't clear general error here, only fetch-specific errors if needed
-        // setError('');
+        if (!isMounted.current) return; // Check if mounted
+        // console.log("Fetching followup questions..."); // Keep commented unless debugging needed
 
         try {
             const data = await getFollowupQuestions(sessionId);
@@ -48,118 +44,135 @@ const FollowupQuestions = ({ sessionId }) => {
 
             if (data === null || data === undefined) {
                 console.warn("API returned null/undefined followup data.");
-                // Don't set a major error, just log, maybe backend is done? Status check will handle it.
             } else {
-                setFollowupQuestions(data); // Update state with current questions
-
-                // Initialize answers state only for *newly* arrived questions
-                setAnswers((prev) => {
-                    const newAnswers = { ...prev };
-                    let needsUpdate = false;
-                    data.forEach((q) => {
-                        if (!(q.question_id in newAnswers)) {
-                            needsUpdate = true;
-                            const fields = q.additional_fields || {};
-                            const multiOptions = fields.multiple_correct_answer_options || [];
-                            if (multiOptions.length > 0) {
-                                newAnswers[q.question_id] = { values: [], subjective_value: '' };
-                            } else {
-                                newAnswers[q.question_id] = '';
-                            }
-                        }
-                    });
-                    return needsUpdate ? newAnswers : prev;
-                });
+                 // Basic check to see if questions actually changed before updating state
+                 // This is a shallow comparison, could be improved if needed
+                 setFollowupQuestions(currentQuestions => {
+                     if (JSON.stringify(currentQuestions) !== JSON.stringify(data)) {
+                         // Initialize answers only for new questions if data changed
+                         setAnswers((prevAnswers) => {
+                             const newAnswers = { ...prevAnswers };
+                             let needsUpdate = false;
+                             data.forEach((q) => {
+                                 if (!(q.question_id in newAnswers)) {
+                                     needsUpdate = true;
+                                     const fields = q.additional_fields || {};
+                                     const multiOptions = fields.multiple_correct_answer_options || [];
+                                     if (multiOptions.length > 0) {
+                                         newAnswers[q.question_id] = { values: [], subjective_value: '' };
+                                     } else {
+                                         newAnswers[q.question_id] = '';
+                                     }
+                                 }
+                             });
+                             // Only update answers if new questions were found
+                             if (needsUpdate) return newAnswers;
+                             return prevAnswers; // Return previous answers if no new questions
+                         });
+                         return data; // Update questions list
+                     }
+                     return currentQuestions; // Return existing questions if no change
+                 });
             }
             // Set loading false *only after the very first successful fetch*
-            if (loading) setLoading(false);
+             if (loading) setLoading(false);
 
         } catch (fetchError) {
             if (!isMounted.current) return;
             console.error('Error retrieving follow-up questions:', fetchError);
-            // Don't set a persistent error here, status check handles final state
-            // setError('Failed to load questions. Retrying in background...');
-            if (loading) setLoading(false); // Ensure loading stops even on initial error
+            // Avoid setting persistent error here; let polling retry or status check handle final state
+             if (loading) setLoading(false); // Ensure loading stops even on initial error
         }
-    }, [sessionId, pipelineState, loading]); // Depend on pipelineState and loading
+    }, [sessionId, loading]); // Removed pipelineState dependency
 
-    // --- Check Overall Pipeline Status ---
-    const checkPipelineStatus = useCallback(async () => {
+    // --- Combined Polling Function ---
+    const pollData = useCallback(async () => {
         if (!isMounted.current || !sessionId) return; // Stop if unmounted or no session ID
 
-        // console.log("Polling for overall pipeline status..."); // Debug log
+        // console.log("Polling cycle initiated...");
         try {
-            const result = await getRecommendationsStatus(sessionId);
+            // 1. Check Pipeline Status FIRST
+            const statusResult = await getRecommendationsStatus(sessionId);
             if (!isMounted.current) return; // Check again after await
 
-            console.log("Pipeline Status Check Result:", result.status); // Log the received status
-            setPipelineState(result.status); // Update the tracked pipeline state
+            console.log("Pipeline Status Check Result:", statusResult.status);
 
-            // --- Navigation Logic ---
-            // Navigate if the pipeline is definitively finished or errored
-            if (result.status === PipelineStatus.READY ||
-                result.status === PipelineStatus.ERROR ||
-                result.status === PipelineStatus.GENERATING_REPORT || // Navigate as soon report gen starts
-                result.status === PipelineStatus.NOT_FOUND) // Also navigate on not_found
+            // 2. Decide action based on status
+            const currentStatus = statusResult.status;
+
+            if (currentStatus === PipelineStatus.PIPELINE_RUNNING ||
+                currentStatus === PipelineStatus.SESSION_CREATED || // Treat these initial states as "running" for polling purposes
+                currentStatus === PipelineStatus.STARTED)
             {
-                console.log(`Pipeline status (${result.status}) indicates follow-up phase is over. Navigating...`);
-
-                // Clear intervals BEFORE navigating
-                if (followupIntervalRef.current) clearInterval(followupIntervalRef.current);
-                if (statusCheckIntervalRef.current) clearInterval(statusCheckIntervalRef.current);
-                followupIntervalRef.current = null;
-                statusCheckIntervalRef.current = null;
-
-                navigate('/recommendations'); // Navigate to recommendations page
+                // If pipeline is running, fetch follow-up questions
+                // console.log("Pipeline running, fetching questions...");
+                await fetchAndSetQuestions();
             }
-            // No else needed: If status is PIPELINE_RUNNING, polling continues
+            else if (currentStatus === PipelineStatus.READY ||
+                     currentStatus === PipelineStatus.ERROR ||
+                     currentStatus === PipelineStatus.GENERATING_REPORT ||
+                     currentStatus === PipelineStatus.NOT_FOUND)
+            {
+                // If pipeline is finished, errored, or moved to report generation, STOP polling and navigate
+                console.log(`Pipeline status (${currentStatus}) indicates follow-up phase is over. Stopping poll and navigating...`);
 
-        } catch (statusError) {
+                if (pollingIntervalRef.current) {
+                    clearInterval(pollingIntervalRef.current);
+                    pollingIntervalRef.current = null;
+                }
+                navigate('/recommendations'); // Navigate to recommendations page
+            } else {
+                // Handle unknown status?
+                console.warn(`Received unknown pipeline status: ${currentStatus}`);
+                // Optionally, continue polling questions or stop and show error?
+                // For now, let's continue polling questions just in case it's a transient backend state
+                await fetchAndSetQuestions();
+            }
+
+        } catch (pollError) {
             if (!isMounted.current) return;
-            console.error('Error checking pipeline status:', statusError);
-            // If status check fails repeatedly, maybe set an error state?
-            // For now, just log it. The next poll might succeed.
-            // setError("Could not check assessment status. Retrying...");
+            console.error('Error during polling cycle:', pollError);
+            // Maybe set a temporary error message?
+            // setError("Polling error. Retrying...");
         }
-    }, [sessionId, navigate]); // Dependencies
+    }, [sessionId, navigate, fetchAndSetQuestions]); // Dependencies
 
-    // --- useEffect for Polling ---
+    // --- useEffect for Initial Load and Polling ---
     useEffect(() => {
         isMounted.current = true; // Set mounted state on mount
 
         if (!sessionId) {
             setError('No Session ID provided.');
             setLoading(false);
-            setPipelineState(PipelineStatus.ERROR); // Set error state if no session ID
-            return; // Stop if no session ID
+            // No polling needed if no session ID
+            return;
         }
 
         setLoading(true); // Start loading
         setError(''); // Clear previous errors
-        setPipelineState(PipelineStatus.PIPELINE_RUNNING); // Assume running initially
 
-        // Initial fetches
-        fetchAndSetQuestions();
-        checkPipelineStatus();
+        // Initial data fetch cycle
+        pollData();
 
-        // Start polling intervals
-        // console.log("Starting polling intervals...");
-        followupIntervalRef.current = setInterval(fetchAndSetQuestions, 10000); // Poll questions (will self-limit based on pipelineState)
-        statusCheckIntervalRef.current = setInterval(checkPipelineStatus, 12000); // Poll status (will trigger navigation)
+        // Start the single polling interval
+        // console.log("Starting combined polling interval...");
+        // Poll every 12 seconds (adjust timing as needed)
+        pollingIntervalRef.current = setInterval(pollData, 12000);
 
         // Cleanup function
         return () => {
             isMounted.current = false; // Set unmounted state on cleanup
             // console.log("Stopping polling (cleanup).");
-            if (followupIntervalRef.current) clearInterval(followupIntervalRef.current);
-            if (statusCheckIntervalRef.current) clearInterval(statusCheckIntervalRef.current);
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
         };
-        // Only depend on sessionId, fetchAndSetQuestions, checkPipelineStatus
-    }, [sessionId, fetchAndSetQuestions, checkPipelineStatus]);
+        // Depend only on sessionId and the memoized pollData function
+    }, [sessionId, pollData]);
 
 
     // --- Answer Handlers (handleAnswerChange, handleMultiSelectChange, handleSubjectiveInputChange) ---
-    // (Keep existing implementations - No changes needed here)
+    // (No changes needed here)
     const handleAnswerChange = (questionId, value) => {
         setAnswers((prev) => ({ ...prev, [questionId]: value }));
     };
@@ -188,7 +201,7 @@ const FollowupQuestions = ({ sessionId }) => {
 
 
     // --- Submit Handler (handleSubmit) ---
-    // (Keep existing implementation - No changes needed here)
+    // (No changes needed here)
     const handleSubmit = async () => {
         setSubmitting(true);
         setError('');
@@ -242,7 +255,8 @@ const FollowupQuestions = ({ sessionId }) => {
         try {
             await submitFollowupResponses(filteredPayload);
             alert('Answers submitted successfully.');
-            // Let polling handle fetching updated questions (likely empty now)
+            // After submission, the next poll cycle should fetch an empty question list
+            // and eventually the status check will trigger navigation.
             // Optionally clear local answers: setAnswers({});
         } catch (submitError) {
             console.error('Error submitting follow-up responses:', submitError);
@@ -257,7 +271,7 @@ const FollowupQuestions = ({ sessionId }) => {
     };
 
     // --- Render Input Logic (renderQuestionInput) ---
-    // (Keep existing implementation - No changes needed here)
+    // (No changes needed here)
     const renderQuestionInput = (q) => {
         const qId = q.question_id;
         const fields = q.additional_fields || {};
@@ -316,8 +330,8 @@ const FollowupQuestions = ({ sessionId }) => {
 
     // --- Main Return Logic ---
 
-    // Show error if session ID was missing initially
     if (!sessionId) {
+        // Render error message if session ID is missing
         return (
             <div className="error-message" style={{ color: 'red', padding: '20px', border: '1px solid red', margin: '20px', borderRadius: '5px', textAlign: 'center' }}>
                 Error: No session ID found. Please start the process over.
@@ -325,8 +339,8 @@ const FollowupQuestions = ({ sessionId }) => {
         );
     }
 
-    // Show loading indicator only during the very initial phase
     if (loading) {
+        // Render loading indicator during initial fetch
         return (
             <div className="loading-screen" style={{ padding: '40px 20px', textAlign: 'center', color: '#555' }}>
                 <h2>Checking for follow-up questions...</h2>
@@ -336,7 +350,7 @@ const FollowupQuestions = ({ sessionId }) => {
         );
     }
 
-    // Main render: Display questions or a waiting message based on state
+    // Main render: Display questions or a waiting message
     return (
         <div className="followup-questions-container" style={{ padding: '20px', maxWidth: '800px', margin: '20px auto', fontFamily: 'Arial, sans-serif', border: '1px solid #e0e0e0', borderRadius: '8px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)', background: '#fff' }}>
             <h1 style={{ textAlign: 'center', marginBottom: '25px', color: '#333' }}>
@@ -350,8 +364,8 @@ const FollowupQuestions = ({ sessionId }) => {
                 </p>
             )}
 
-            {/* Show questions if available AND pipeline is still running */}
-            {pipelineState === PipelineStatus.PIPELINE_RUNNING && followupQuestions.length > 0 ? (
+            {/* Show questions ONLY if the list is not empty */}
+            {followupQuestions.length > 0 ? (
                 <>
                     <p style={{ marginBottom: '20px', color: '#555' }}>
                         Please answer the following questions to help refine the assessment.
@@ -380,24 +394,14 @@ const FollowupQuestions = ({ sessionId }) => {
                     </button>
                 </>
             ) : (
-                /* Display message when no questions are available OR pipeline is past running state */
+                /* Display message when no questions are available (and not loading) */
+                /* This message will show while polling continues until status changes */
                 <div className="no-questions-message" style={{ padding: '30px 20px', textAlign: 'center', color: '#555', background: '#f0f0f0', borderRadius: '5px' }}>
-                    {pipelineState === PipelineStatus.PIPELINE_RUNNING ? (
-                        <> {/* Use Fragment here */}
-                            <h2>No follow-up questions available at this moment.</h2>
-                            <p>Checking for updates or waiting for the next step...</p>
-                        </>
-                    ) : (
-                         // --- FIX START ---
-                         // Wrap adjacent elements in a Fragment
-                         <>
-                             {/* This message shows briefly before navigation happens */}
-                             <h2>Processing complete or report is generating.</h2>
-                             <p>Redirecting to the recommendations page shortly...</p>
-                         </>
-                         // --- FIX END ---
-                    )}
-                     {/* Remove the manual navigation button as it's automatic now */}
+                     <>
+                         <h2>No follow-up questions available at this moment.</h2>
+                         <p>Checking for updates or waiting for the process to complete...</p>
+                         {/* You could add a subtle spinner here if desired */}
+                     </>
                 </div>
             )}
         </div>
