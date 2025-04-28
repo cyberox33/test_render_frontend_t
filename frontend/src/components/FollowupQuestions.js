@@ -17,90 +17,79 @@ const PipelineStatus = {
     STARTED: 'started',
 };
 
+const POLLING_INTERVAL_MS = 12000; // Set polling interval (e.g., 12 seconds)
 
 const FollowupQuestions = ({ sessionId }) => {
     // --- States ---
     const [followupQuestions, setFollowupQuestions] = useState([]);
-    const [initialLoading, setInitialLoading] = useState(true); // Renamed for clarity: only for initial page load
-    const [isFetchingQuestions, setIsFetchingQuestions] = useState(false); // Track if a fetch is in progress
+    const [initialLoading, setInitialLoading] = useState(true);
     const [answers, setAnswers] = useState({});
     const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState(''); // For user-facing errors
+    const [error, setError] = useState('');
 
     // --- Hooks and Refs ---
     const navigate = useNavigate();
-    const pollingIntervalRef = useRef(null);
-    const isMounted = useRef(true);
+    const timeoutRef = useRef(null); // Ref to store the setTimeout ID
+    const isMounted = useRef(true); // Track mount status
 
-    // --- Fetch Follow-up Questions (Called by pollData) ---
+    // --- Fetch Follow-up Questions (Stable - only depends on sessionId) ---
+    // This function is now simpler as it doesn't need to manage fetching state itself
     const fetchAndSetQuestions = useCallback(async () => {
-        // Prevent concurrent fetches
-        if (!isMounted.current || isFetchingQuestions) return;
-
-        setIsFetchingQuestions(true);
+        if (!isMounted.current) return;
         // console.log("Fetching followup questions...");
 
         try {
             const data = await getFollowupQuestions(sessionId);
-            if (!isMounted.current) return; // Check mount status after await
+            if (!isMounted.current) return;
 
             if (data === null || data === undefined) {
                 console.warn("API returned null/undefined followup data.");
-                // If data is null/undefined, maybe clear existing questions?
-                // setFollowupQuestions([]); // Optional: uncomment if null means "no questions right now"
+                 // Decide if null/undefined should clear questions
+                 setFollowupQuestions(current => current.length === 0 ? current : []); // Clear only if not already empty
             } else {
-                // More robust check: Only update state if the actual content differs
+                // Update questions and initialize answers for new ones
                 setFollowupQuestions(currentQuestions => {
                     const currentIds = currentQuestions.map(q => q.question_id).sort().join(',');
                     const newIds = data.map(q => q.question_id).sort().join(',');
 
                     if (currentIds !== newIds) {
                         console.log("New questions detected, updating state.");
-                        // Initialize answers only for new questions
                         setAnswers((prevAnswers) => {
                             const newAnswers = { ...prevAnswers };
                             data.forEach((q) => {
                                 if (!(q.question_id in newAnswers)) {
                                     const fields = q.additional_fields || {};
                                     const multiOptions = fields.multiple_correct_answer_options || [];
-                                    if (multiOptions.length > 0) {
-                                        newAnswers[q.question_id] = { values: [], subjective_value: '' };
-                                    } else {
-                                        newAnswers[q.question_id] = '';
-                                    }
+                                    newAnswers[q.question_id] = multiOptions.length > 0
+                                        ? { values: [], subjective_value: '' }
+                                        : '';
                                 }
                             });
-                            // No need for needsUpdate flag, just return the potentially modified newAnswers
                             return newAnswers;
                         });
                         return data; // Update the questions list
                     }
-                    // If IDs are the same, assume questions haven't changed, return the current state
-                    return currentQuestions;
+                    return currentQuestions; // No change
                 });
             }
         } catch (fetchError) {
             if (!isMounted.current) return;
             console.error('Error retrieving follow-up questions:', fetchError);
-            // Avoid setting persistent error here
-        } finally {
-            // Ensure fetching flag is reset even if errors occur
-             if (isMounted.current) {
-                setIsFetchingQuestions(false);
-             }
+            // setError("Could not fetch questions."); // Set transient error maybe?
         }
-        // Intentionally removed `loading` from dependency array to stabilize the function reference
-    }, [sessionId, isFetchingQuestions]); // Depends on sessionId and its own fetching state flag
+    }, [sessionId]); // Dependency is stable
 
-    // --- Combined Polling Function ---
+    // --- Polling Function (Recursive setTimeout) ---
     const pollData = useCallback(async () => {
-        if (!isMounted.current || !sessionId) return;
+        if (!isMounted.current || !sessionId) return; // Stop if unmounted or no session ID
 
         // console.log("Polling cycle initiated...");
+        let shouldStopPolling = false; // Flag to prevent scheduling next poll if navigating
+
         try {
             // 1. Check Pipeline Status FIRST
             const statusResult = await getRecommendationsStatus(sessionId);
-            if (!isMounted.current) return;
+            if (!isMounted.current) return; // Check mount status after await
 
             // console.log("Pipeline Status Check Result:", statusResult.status);
             const currentStatus = statusResult.status;
@@ -110,8 +99,8 @@ const FollowupQuestions = ({ sessionId }) => {
                 currentStatus === PipelineStatus.SESSION_CREATED ||
                 currentStatus === PipelineStatus.STARTED)
             {
-                // If pipeline is running, fetch follow-up questions (fetchAndSetQuestions handles the isFetching flag)
-                // console.log("Pipeline running, attempting to fetch questions...");
+                // If pipeline is running, fetch follow-up questions
+                // console.log("Pipeline running, fetching questions...");
                 await fetchAndSetQuestions();
             }
             else if (currentStatus === PipelineStatus.READY ||
@@ -120,11 +109,8 @@ const FollowupQuestions = ({ sessionId }) => {
                      currentStatus === PipelineStatus.NOT_FOUND)
             {
                 // If pipeline is finished, errored, or moved to report generation, STOP polling and navigate
-                console.log(`Pipeline status (${currentStatus}) indicates follow-up phase is over. Stopping poll and navigating...`);
-                if (pollingIntervalRef.current) {
-                    clearInterval(pollingIntervalRef.current);
-                    pollingIntervalRef.current = null;
-                }
+                console.log(`Pipeline status (${currentStatus}) indicates follow-up phase is over. Navigating...`);
+                shouldStopPolling = true; // Set flag to stop
                 navigate('/recommendations');
             } else {
                 console.warn(`Received unknown pipeline status: ${currentStatus}. Attempting to fetch questions anyway.`);
@@ -136,14 +122,22 @@ const FollowupQuestions = ({ sessionId }) => {
             console.error('Error during polling cycle:', pollError);
             // setError("Polling error. Retrying..."); // Maybe show transient error
         } finally {
-             // Set initial loading to false after the first poll completes (success or error)
-             if (initialLoading && isMounted.current) {
-                 setInitialLoading(false);
+            if (isMounted.current) {
+                 // Set initial loading to false after the first poll completes
+                 if (initialLoading) {
+                    setInitialLoading(false);
+                 }
+                 // Schedule the next poll *only if* we haven't decided to stop
+                 if (!shouldStopPolling) {
+                    // console.log(`Scheduling next poll in ${POLLING_INTERVAL_MS}ms`);
+                    timeoutRef.current = setTimeout(pollData, POLLING_INTERVAL_MS);
+                 }
              }
         }
-    }, [sessionId, navigate, fetchAndSetQuestions, initialLoading]); // Add initialLoading here
+    }, [sessionId, navigate, fetchAndSetQuestions, initialLoading]); // Dependencies
 
-    // --- useEffect for Initial Load and Polling ---
+
+    // --- useEffect for Initial Load and Starting Polling ---
     useEffect(() => {
         isMounted.current = true;
 
@@ -153,25 +147,24 @@ const FollowupQuestions = ({ sessionId }) => {
             return;
         }
 
-        setInitialLoading(true); // Set loading true on mount/sessionId change
+        setInitialLoading(true);
         setError('');
+        setFollowupQuestions([]); // Clear questions on mount/sessionId change
+        setAnswers({}); // Clear answers
 
-        // Initial data fetch cycle
+        // Start the first polling cycle
         pollData();
 
-        // Start the single polling interval
-        // console.log("Starting combined polling interval...");
-        pollingIntervalRef.current = setInterval(pollData, 12000); // Poll every 12 seconds
-
-        // Cleanup function
+        // Cleanup function: Clear timeout on unmount
         return () => {
             isMounted.current = false;
-            // console.log("Stopping polling (cleanup).");
-            if (pollingIntervalRef.current) {
-                clearInterval(pollingIntervalRef.current);
+            console.log("Clearing polling timeout (cleanup).");
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
             }
         };
-    }, [sessionId, pollData]); // pollData is memoized and should be stable
+        // Effect runs when sessionId changes or pollData reference changes (which depends on fetchAndSetQuestions)
+    }, [sessionId, pollData]); // Keep pollData dependency
 
 
     // --- Answer Handlers (handleAnswerChange, handleMultiSelectChange, handleSubjectiveInputChange) ---
@@ -204,10 +197,17 @@ const FollowupQuestions = ({ sessionId }) => {
 
 
     // --- Submit Handler (handleSubmit) ---
-    // (No changes needed)
+    // (No changes needed, but added clearing timeout temporarily)
     const handleSubmit = async () => {
+        // Temporarily clear polling during submission to avoid conflicts
+        if (timeoutRef.current) {
+             clearTimeout(timeoutRef.current);
+             timeoutRef.current = null;
+        }
+
         setSubmitting(true);
         setError('');
+        // --- (rest of existing submit logic) ---
         const payload = followupQuestions.map((q) => {
             const qId = q.question_id;
             const answerState = answers[qId];
@@ -252,16 +252,19 @@ const FollowupQuestions = ({ sessionId }) => {
         if (filteredPayload.length === 0) {
             alert('Please answer at least one question before submitting.');
             setSubmitting(false);
+             // Restart polling if submission is cancelled
+            if (isMounted.current) {
+                 timeoutRef.current = setTimeout(pollData, POLLING_INTERVAL_MS);
+            }
             return;
         }
         console.log('Submitting Payload:', JSON.stringify(filteredPayload, null, 2));
+        // --- (rest of existing submit logic) ---
         try {
             await submitFollowupResponses(filteredPayload);
             alert('Answers submitted successfully.');
-            // Clear the displayed questions immediately after successful submission
-            // The next poll will likely confirm they are gone anyway.
             setFollowupQuestions([]);
-            setAnswers({}); // Clear answers as well
+            setAnswers({});
         } catch (submitError) {
             console.error('Error submitting follow-up responses:', submitError);
             const errorMsg = submitError.response?.data?.detail || submitError.message || 'Unknown error';
@@ -270,6 +273,9 @@ const FollowupQuestions = ({ sessionId }) => {
         } finally {
             if (isMounted.current) {
                  setSubmitting(false);
+                 // Restart polling after submission attempt completes (success or error)
+                 // console.log("Restarting polling after submission attempt.");
+                 timeoutRef.current = setTimeout(pollData, POLLING_INTERVAL_MS);
             }
         }
     };
@@ -335,77 +341,42 @@ const FollowupQuestions = ({ sessionId }) => {
     // --- Main Return Logic ---
 
     if (!sessionId) {
-        return (
-            <div className="error-message" style={{ color: 'red', padding: '20px', border: '1px solid red', margin: '20px', borderRadius: '5px', textAlign: 'center' }}>
-                Error: No session ID found. Please start the process over.
-            </div>
-        );
+        return ( <div className="error-message" style={{ color: 'red', padding: '20px', border: '1px solid red', margin: '20px', borderRadius: '5px', textAlign: 'center' }}>Error: No session ID found. Please start the process over.</div> );
     }
 
-    if (initialLoading) { // Show loading only on initial mount
-        return (
-            <div className="loading-screen" style={{ padding: '40px 20px', textAlign: 'center', color: '#555' }}>
-                <h2>Checking for follow-up questions...</h2>
-                <p>Please wait.</p>
-                <div style={{ marginTop: '20px', height: '30px' }}><span>Loading...</span></div>
-            </div>
-        );
+    if (initialLoading) {
+        return ( <div className="loading-screen" style={{ padding: '40px 20px', textAlign: 'center', color: '#555' }}><h2>Checking for follow-up questions...</h2><p>Please wait.</p><div style={{ marginTop: '20px', height: '30px' }}><span>Loading...</span></div></div> );
     }
 
-    // Main render: Display questions or a waiting message
     return (
         <div className="followup-questions-container" style={{ padding: '20px', maxWidth: '800px', margin: '20px auto', fontFamily: 'Arial, sans-serif', border: '1px solid #e0e0e0', borderRadius: '8px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)', background: '#fff' }}>
-            <h1 style={{ textAlign: 'center', marginBottom: '25px', color: '#333' }}>
-                Follow-Up Questions
-            </h1>
+            <h1 style={{ textAlign: 'center', marginBottom: '25px', color: '#333' }}>Follow-Up Questions</h1>
 
-            {error && (
-                <p className="error-message" style={{ color: 'red', border: '1px solid red', padding: '10px 15px', marginBottom: '20px', borderRadius: '4px', background: '#ffebee' }}>
-                    {error}
-                </p>
-            )}
+            {error && ( <p className="error-message" style={{ color: 'red', border: '1px solid red', padding: '10px 15px', marginBottom: '20px', borderRadius: '4px', background: '#ffebee' }}>{error}</p> )}
 
-            {/* Show questions ONLY if the list is not empty */}
             {followupQuestions.length > 0 ? (
                 <>
-                    <p style={{ marginBottom: '20px', color: '#555' }}>
-                        Please answer the following questions to help refine the assessment.
-                        {isFetchingQuestions && <span style={{marginLeft: '10px', fontStyle: 'italic'}}>(Checking for updates...)</span>} {/* Subtle fetch indicator */}
-                    </p>
+                    <p style={{ marginBottom: '20px', color: '#555' }}>Please answer the following questions to help refine the assessment.</p>
                     <div className="questions-list">
                         {followupQuestions.map((q) => (
                             <div key={q.question_id} className="question-card" style={{ border: '1px solid #ddd', padding: '20px', marginBottom: '20px', borderRadius: '5px', background: '#f9f9f9', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                                <h3 style={{ marginTop: '0', marginBottom: '10px', color: '#444', fontSize: '1.1em' }}>
-                                    {q.question}
-                                </h3>
-                                {q.additional_fields?.guidelines && (
-                                    <p className="guidelines" style={{ fontSize: '0.9em', color: '#666', margin: '0 0 15px 0', fontStyle: 'italic', borderLeft: '3px solid #007bff', padding: '8px 10px', background: '#e7f3ff', borderRadius: '3px' }}>
-                                        <strong>Guidelines:</strong> {q.additional_fields.guidelines}
-                                    </p>
-                                )}
-                                <div className="input-area" style={{ marginTop: '15px' }}>
-                                    {renderQuestionInput(q)}
-                                </div>
+                                <h3 style={{ marginTop: '0', marginBottom: '10px', color: '#444', fontSize: '1.1em' }}>{q.question}</h3>
+                                {q.additional_fields?.guidelines && ( <p className="guidelines" style={{ fontSize: '0.9em', color: '#666', margin: '0 0 15px 0', fontStyle: 'italic', borderLeft: '3px solid #007bff', padding: '8px 10px', background: '#e7f3ff', borderRadius: '3px' }}><strong>Guidelines:</strong> {q.additional_fields.guidelines}</p> )}
+                                <div className="input-area" style={{ marginTop: '15px' }}>{renderQuestionInput(q)}</div>
                             </div>
                         ))}
                     </div>
-                    <button onClick={handleSubmit} disabled={submitting}
-                        style={{ marginTop: '10px', padding: '12px 25px', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: '1.05em', backgroundColor: submitting ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '5px', opacity: submitting ? 0.7 : 1, display: 'block', width: '100%', boxSizing: 'border-box' }}>
+                    <button onClick={handleSubmit} disabled={submitting} style={{ marginTop: '10px', padding: '12px 25px', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: '1.05em', backgroundColor: submitting ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '5px', opacity: submitting ? 0.7 : 1, display: 'block', width: '100%', boxSizing: 'border-box' }}>
                         {submitting ? 'Submitting...' : 'Submit Answers'}
                     </button>
                 </>
             ) : (
-                /* Display message when no questions are available */
                 <div className="no-questions-message" style={{ padding: '30px 20px', textAlign: 'center', color: '#555', background: '#f0f0f0', borderRadius: '5px' }}>
                      <>
                          <h2>No follow-up questions available at this moment.</h2>
-                         <p>
-                             {isFetchingQuestions
-                               ? "Checking for updates..."
-                               : "Waiting for the assessment process to complete..."}
-                         </p>
-                         {/* Optional: Add a spinner when isFetchingQuestions is true */}
-                         {isFetchingQuestions && <div style={{marginTop: '10px'}}><span>Loading...</span></div>}
+                         <p>Checking for updates or waiting for the process to complete...</p>
+                         {/* You could add a spinner here */}
+                         {/* <div style={{marginTop: '10px'}}><span>Loading...</span></div> */}
                      </>
                 </div>
             )}
